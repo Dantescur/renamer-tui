@@ -97,9 +97,6 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive_format: tar.gz
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            archive_format: tar.gz
           - os: macos-latest
             target: x86_64-apple-darwin
             archive_format: tar.gz
@@ -139,31 +136,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwayland-dev libxkbcommon-dev
 
-      - name: Install cross-compilation tools (Linux ARM64)
-        if: matrix.os == 'ubuntu-latest' && matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-
       - name: Build release binary
         shell: bash
         run: |
-          # Set up cross-compilation environment for Linux ARM64
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-          fi
-
           cargo build --release --target ${{ matrix.target }}
 
       - name: Strip binary (Unix)
         if: runner.os != 'Windows'
         run: |
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            aarch64-linux-gnu-strip "target/${{ matrix.target }}/release/renamer-tui" || strip "target/${{ matrix.target }}/release/renamer-tui"
-          else
             strip "target/${{ matrix.target }}/release/renamer-tui"
-          fi
 
       - name: Prepare artifacts (Unix)
         if: runner.os != 'Windows'
@@ -245,14 +226,6 @@ jobs:
             tar xzf renamer-tui-${{ needs.prepare.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz
             chmod +x renamer-tui-${{ needs.prepare.outputs.version }}-x86_64-unknown-linux-gnu
             sudo mv renamer-tui-${{ needs.prepare.outputs.version }}-x86_64-unknown-linux-gnu /usr/local/bin/renamer-tui
-            ```
-
-            **Linux (ARM64)**
-            ```bash
-            wget https://github.com/${{ github.repository }}/releases/download/${{ needs.prepare.outputs.tag }}/renamer-tui-${{ needs.prepare.outputs.version }}-aarch64-unknown-linux-gnu.tar.gz
-            tar xzf renamer-tui-${{ needs.prepare.outputs.version }}-aarch64-unknown-linux-gnu.tar.gz
-            chmod +x renamer-tui-${{ needs.prepare.outputs.version }}-aarch64-unknown-linux-gnu
-            sudo mv renamer-tui-${{ needs.prepare.outputs.version }}-aarch64-unknown-linux-gnu /usr/local/bin/renamer-tui
             ```
 
             **macOS (Intel/Apple Silicon)**
