@@ -1,6 +1,6 @@
 [package]
 name = "renamer-tui"
-version = "0.1.0"
+version = "0.1.2"
 description = "A terminal UI for batch-renaming video series files"
 authors = ["Dantescur <daniel@thedaniweb.eu.org>"]
 license = "MIT"
