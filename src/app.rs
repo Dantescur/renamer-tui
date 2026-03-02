@@ -13,6 +13,7 @@ use crate::{
 pub enum Focus {
     PathBar,
     FileList,
+    Log,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +32,8 @@ pub struct App {
     pub entries: Vec<FileEntry>,
     pub selected: usize,
     pub log: Vec<String>,
+    pub log_scroll: u16,
+    pub log_viewport_height: u16,
     pub picker_open: bool,
     pub events: EventHandler,
 }
@@ -51,9 +54,19 @@ impl App {
             entries: vec![],
             selected: 0,
             log: vec![],
+            log_scroll: 0,
+            log_viewport_height: 4,
             picker_open: false,
             events: EventHandler::new(),
         }
+    }
+
+    pub fn log_max_scroll(&self) -> u16 {
+        (self.log.len() as u16).saturating_sub(self.log_viewport_height)
+    }
+
+    pub fn log_scroll_to_bottom(&mut self) {
+        self.log_scroll = self.log_max_scroll();
     }
 
     pub fn current_path(&self) -> PathBuf {
@@ -62,7 +75,7 @@ impl App {
 
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
         while self.running {
-            terminal.draw(|frame| crate::ui::render(&self, frame))?;
+            terminal.draw(|frame| crate::ui::render(&mut self, frame))?;
             match self.events.next().await? {
                 Event::Tick => {}
                 Event::Crossterm(event) => {
@@ -144,6 +157,33 @@ impl App {
                     KeyCode::Char('q') => self.events.send(AppEvent::Quit),
                     _ => {}
                 },
+                Focus::Log => match key.code {
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        self.log_scroll =
+                            self.log_scroll.saturating_add(1).min(self.log_max_scroll());
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        self.log_scroll = self.log_scroll.saturating_sub(1);
+                    }
+                    KeyCode::PageDown => {
+                        self.log_scroll = self
+                            .log_scroll
+                            .saturating_add(self.log_viewport_height)
+                            .min(self.log_max_scroll());
+                    }
+                    KeyCode::PageUp => {
+                        self.log_scroll = self.log_scroll.saturating_sub(self.log_viewport_height);
+                    }
+                    KeyCode::Char('g') => {
+                        self.log_scroll = 0;
+                    }
+                    KeyCode::Char('G') => {
+                        self.log_scroll_to_bottom();
+                    }
+                    KeyCode::Tab | KeyCode::Esc => self.events.send(AppEvent::ToggleFocus),
+                    KeyCode::Char('q') => self.events.send(AppEvent::Quit),
+                    _ => {}
+                },
             },
             AppMode::ConfirmDialog => match key.code {
                 KeyCode::Char('y') | KeyCode::Enter => {
@@ -203,7 +243,8 @@ impl App {
             AppEvent::ToggleFocus => {
                 self.focus = match self.focus {
                     Focus::PathBar => Focus::FileList,
-                    Focus::FileList => Focus::PathBar,
+                    Focus::FileList => Focus::Log,
+                    Focus::Log => Focus::PathBar,
                 };
             }
 
@@ -249,6 +290,7 @@ impl App {
                 "❌  '{}' is not a valid directory.",
                 path.display()
             ));
+            self.log_scroll_to_bottom();
             return;
         }
 
@@ -273,6 +315,7 @@ impl App {
                 total, renameable, already_done, skipped,
             ));
         }
+        self.log_scroll_to_bottom();
     }
 
     fn do_rename(&mut self) {

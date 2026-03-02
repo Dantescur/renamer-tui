@@ -1,3 +1,6 @@
+use ratatui::widgets::Scrollbar;
+use ratatui::widgets::ScrollbarOrientation;
+use ratatui::widgets::ScrollbarState;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -23,7 +26,7 @@ const RED: Color = Color::Rgb(220, 80, 80);
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
-pub fn render(app: &App, frame: &mut Frame) {
+pub fn render(app: &mut App, frame: &mut Frame) {
     let area = frame.area();
     frame.render_widget(ratatui::widgets::Block::default().bg(BG), area);
 
@@ -154,7 +157,7 @@ fn render_column_headers(frame: &mut Frame, area: Rect) {
 
 // ── File lists ────────────────────────────────────────────────────────────────
 
-fn render_file_lists(app: &App, frame: &mut Frame, area: Rect) {
+fn render_file_lists(app: &mut App, frame: &mut Frame, area: Rect) {
     let active_list = app.focus == Focus::FileList && app.mode == AppMode::Normal;
     let border_color = if active_list {
         BORDER_ACTIVE
@@ -294,12 +297,37 @@ fn render_file_lists(app: &App, frame: &mut Frame, area: Rect) {
 
 // ── Log panel ────────────────────────────────────────────────────────────────
 
-fn render_log(app: &App, frame: &mut Frame, area: Rect) {
+pub fn render_log(app: &mut App, frame: &mut Frame, area: Rect) {
+    let active = app.focus == Focus::Log && app.mode == AppMode::Normal;
+    let border_color = if active {
+        BORDER_ACTIVE
+    } else {
+        BORDER_INACTIVE
+    };
+
+    // Viewport height = panel height minus top+bottom borders
+    let viewport_height = area.height.saturating_sub(2);
+    app.log_viewport_height = viewport_height;
+
+    let total_lines = app.log.len() as u16;
+    let scroll = app.log_scroll;
+
+    // Build title with optional scroll indicator
+    let title_text = if total_lines > viewport_height {
+        let bottom = (scroll + viewport_height).min(total_lines);
+        format!(" Log  {}/{}  ", bottom, total_lines)
+    } else {
+        " Log ".to_string()
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(BORDER_INACTIVE))
-        .title(Span::styled(" Log ", Style::default().fg(TEXT_DIM)))
+        .border_style(Style::default().fg(border_color))
+        .title(Span::styled(
+            title_text,
+            Style::default().fg(if active { ACCENT } else { TEXT_DIM }),
+        ))
         .bg(SURFACE);
 
     let lines: Vec<Line> = app
@@ -319,13 +347,35 @@ fn render_log(app: &App, frame: &mut Frame, area: Rect) {
         })
         .collect();
 
-    let scroll = (lines.len() as u16).saturating_sub(4);
     let para = Paragraph::new(Text::from(lines))
         .block(block)
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
 
     frame.render_widget(para, area);
+
+    // Scrollbar — only shown when content overflows
+    if total_lines > viewport_height {
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("▲"))
+            .end_symbol(Some("▼"))
+            .track_symbol(Some("│"))
+            .thumb_symbol("█");
+
+        let mut scrollbar_state =
+            ScrollbarState::new(total_lines.saturating_sub(viewport_height) as usize)
+                .position(scroll as usize);
+
+        // Inset the scrollbar inside the border on the right edge
+        let scrollbar_area = Rect {
+            x: area.x + area.width.saturating_sub(1),
+            y: area.y + 1,
+            width: 1,
+            height: viewport_height,
+        };
+
+        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
+    }
 }
 
 // ── Help bar ─────────────────────────────────────────────────────────────────
@@ -342,7 +392,15 @@ fn render_help(app: &App, frame: &mut Frame, area: Rect) {
             ("↑↓ / j k", "Navigate"),
             ("Space", "Skip/Include"),
             ("Enter / r", "Rename"),
+            ("Tab", "→ Log"),
             ("Tab", "→ Path"),
+            ("q", "Quit"),
+        ],
+        (AppMode::Normal, Focus::Log) => &[
+            ("↑↓ / j k", "Scroll"),
+            ("PgUp/PgDn", "Page"),
+            ("g / G", "Top/Bottom"),
+            ("Tab / Esc", "→ Path"),
             ("q", "Quit"),
         ],
         (AppMode::ConfirmDialog, _) => &[("y / Enter", "Confirm"), ("n / Esc", "Cancel")],
