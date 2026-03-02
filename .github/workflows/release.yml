@@ -178,7 +178,7 @@ jobs:
           Compress-Archive -Path "${ARTIFACT_NAME}.exe", "${ARTIFACT_NAME}.exe.sha256" -DestinationPath "${ARTIFACT_NAME}.zip" -Force
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: renamer-tui-${{ needs.prepare.outputs.version }}-${{ matrix.target }}
           path: |
