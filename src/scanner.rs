@@ -24,6 +24,42 @@ const VIDEO_EXTENSIONS: &[&str] = &[
 
 const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "sub", "ass", "vtt"];
 
+/// A chunk of a filename for natural sorting — either a run of digits or
+/// a run of non-digit characters (lowercased).
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum NaturalChunk {
+    Text(String),
+    Number(u64),
+}
+
+/// Decompose a string into alternating text/number chunks suitable for
+/// natural (human) sort order, e.g. so "Episode 10" > "Episode 2".
+fn natural_key(s: &str) -> Vec<NaturalChunk> {
+    let mut chunks = Vec::new();
+    let mut chars = s.chars().peekable();
+
+    while let Some(&ch) = chars.peek() {
+        if ch.is_ascii_digit() {
+            // Collect the full run of digits without consuming the boundary char.
+            let mut digits = String::new();
+            while chars.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                digits.push(chars.next().unwrap());
+            }
+            let n: u64 = digits.parse().unwrap_or(u64::MAX);
+            chunks.push(NaturalChunk::Number(n));
+        } else {
+            // Collect the full run of non-digit chars.
+            let mut text = String::new();
+            while chars.peek().map(|c| !c.is_ascii_digit()).unwrap_or(false) {
+                text.push(chars.next().unwrap());
+            }
+            chunks.push(NaturalChunk::Text(text.to_lowercase()));
+        }
+    }
+
+    chunks
+}
+
 /// Strip codec/resolution tags and extract the last episode-like number.
 pub fn extract_number(name: &str) -> Option<u32> {
     // Remove extension first
@@ -47,8 +83,6 @@ pub fn extract_number(name: &str) -> Option<u32> {
             }
             let slice = &cleaned[start..i];
             if let Ok(n) = slice.parse::<u32>() {
-                // Ignore obviously-year-like 4-digit numbers that look like 1920-2099
-                // (common in release years embedded in filenames) unless it's the only number
                 last = Some(n);
             }
         } else {
@@ -149,16 +183,22 @@ pub fn scan_folder(path: &Path) -> Vec<FileEntry> {
         }
     }
 
-    // Sort each group numerically by extracted number, unknowns go last
-    let sort_key = |e: &FileEntry| -> u32 {
-        e.new_name
+    // Natural sort: primary key is the extracted episode number (None → last),
+    // secondary key is a natural sort of the original filename so that files
+    // without a detectable number still appear in human-friendly order.
+    let sort_key = |e: &FileEntry| -> (u64, Vec<NaturalChunk>) {
+        let episode_order = e
+            .new_name
             .as_deref()
-            .and_then(|n| Path::new(n).file_stem()?.to_str()?.parse().ok())
-            .unwrap_or(u32::MAX)
+            .and_then(|n| Path::new(n).file_stem()?.to_str()?.parse::<u64>().ok())
+            .unwrap_or(u64::MAX);
+
+        let name_order = natural_key(&e.original);
+        (episode_order, name_order)
     };
 
-    videos.sort_by_key(sort_key);
-    subtitles.sort_by_key(sort_key);
+    videos.sort_by_key(|a| sort_key(a));
+    subtitles.sort_by_key(|a| sort_key(a));
 
     videos.extend(subtitles);
     videos
@@ -166,9 +206,73 @@ pub fn scan_folder(path: &Path) -> Vec<FileEntry> {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_number;
+    use super::{extract_number, natural_key};
 
-    // ── Basic episode extraction ──────────────────────────────────────────────
+    // ── natural_key ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn natural_key_orders_numbers_numerically() {
+        let mut names = vec![
+            "Episode 10.mkv",
+            "Episode 2.mkv",
+            "Episode 1.mkv",
+            "Episode 20.mkv",
+        ];
+        names.sort_by_key(|a| natural_key(a));
+        assert_eq!(
+            names,
+            [
+                "Episode 1.mkv",
+                "Episode 2.mkv",
+                "Episode 10.mkv",
+                "Episode 20.mkv"
+            ]
+        );
+    }
+
+    #[test]
+    fn natural_key_mixes_text_and_numbers() {
+        let mut names = vec!["s02e10.mkv", "s02e2.mkv", "s01e9.mkv", "s01e10.mkv"];
+        names.sort_by_key(|a| natural_key(a));
+        assert_eq!(
+            names,
+            ["s01e9.mkv", "s01e10.mkv", "s02e2.mkv", "s02e10.mkv"]
+        );
+    }
+
+    #[test]
+    fn natural_key_pure_digits() {
+        let mut names = vec!["10.mkv", "9.mkv", "2.mkv", "100.mkv", "1.mkv"];
+        names.sort_by_key(|a| natural_key(a));
+        assert_eq!(names, ["1.mkv", "2.mkv", "9.mkv", "10.mkv", "100.mkv"]);
+    }
+
+    #[test]
+    fn natural_key_no_numbers_is_alphabetical() {
+        let mut names = vec!["zebra.mkv", "apple.mkv", "mango.mkv"];
+        names.sort_by_key(|a| natural_key(a));
+        assert_eq!(names, ["apple.mkv", "mango.mkv", "zebra.mkv"]);
+    }
+
+    #[test]
+    fn natural_key_leading_zeros_treated_as_number() {
+        // "007" parses to 7, so it sorts before "010" (10) — same as numeric order.
+        assert!(natural_key("007") < natural_key("010"));
+        assert!(natural_key("007") < natural_key("100"));
+    }
+
+    #[test]
+    fn natural_key_case_insensitive() {
+        let mut names = vec!["Episode.mkv", "episode.mkv", "EPISODE.mkv"];
+        names.sort_by_key(|a| natural_key(a));
+        // All three lowercase to the same value — order among them is stable
+        // but they must all group together (no letter-case interleaving).
+        for name in &names {
+            assert_eq!(natural_key(name), natural_key("episode.mkv"));
+        }
+    }
+
+    // ── extract_number ────────────────────────────────────────────────────────
 
     #[test]
     fn simple_numeric_filename() {
@@ -195,18 +299,13 @@ mod tests {
         assert_eq!(extract_number("Some Show 24.avi"), Some(24));
     }
 
-    // ── Year vs episode disambiguation ────────────────────────────────────────
-
     #[test]
     fn year_only_still_returned_when_sole_number() {
-        // No episode number present — the year is the only number, so we return it.
-        // The caller / UI can decide how to handle it; extract_number just finds the last number.
         assert_eq!(extract_number("Documentary.2021.mkv"), Some(2021));
     }
 
     #[test]
     fn year_plus_episode_returns_episode() {
-        // Year comes first; episode number comes last → should return episode.
         assert_eq!(extract_number("Show.2019.S01E05.mkv"), Some(5));
     }
 
@@ -220,11 +319,8 @@ mod tests {
 
     #[test]
     fn multiple_years_episode_last() {
-        // Two year-like numbers followed by a small episode number.
         assert_eq!(extract_number("1999.2001.03.mkv"), Some(3));
     }
-
-    // ── Noise token stripping ─────────────────────────────────────────────────
 
     #[test]
     fn strips_resolution_720p() {
@@ -291,11 +387,8 @@ mod tests {
 
     #[test]
     fn strips_4k() {
-        // "4k" contains the digit 4 — after stripping the token the episode number wins.
         assert_eq!(extract_number("Show.S01E02.4K.mkv"), Some(2));
     }
-
-    // ── Subtitle files ────────────────────────────────────────────────────────
 
     #[test]
     fn subtitle_srt_extension() {
@@ -306,8 +399,6 @@ mod tests {
     fn subtitle_ass_extension() {
         assert_eq!(extract_number("Show.S02E03.ass"), Some(3));
     }
-
-    // ── Edge cases ────────────────────────────────────────────────────────────
 
     #[test]
     fn no_number_returns_none() {
@@ -326,9 +417,6 @@ mod tests {
 
     #[test]
     fn numbers_only_in_extension_ignored() {
-        // Extension digits must not be mistaken for episode numbers.
-        // e.g. "ShowName.mp4" — "4" is part of "mp4" which is stripped as a noise token.
-        // After stripping, no digits remain → None.
         assert_eq!(extract_number("ShowName.mp4"), None);
     }
 
@@ -339,7 +427,6 @@ mod tests {
 
     #[test]
     fn already_renamed_single_number() {
-        // Files that are already in "N.ext" format should still parse correctly.
         assert_eq!(extract_number("42.mkv"), Some(42));
     }
 
@@ -359,7 +446,6 @@ mod tests {
 
     #[test]
     fn double_episode_takes_last() {
-        // Multi-episode files like S01E03E04 — last number wins.
         assert_eq!(extract_number("Show.S01E03E04.mkv"), Some(4));
     }
 }
