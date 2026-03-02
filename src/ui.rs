@@ -173,7 +173,21 @@ fn render_file_lists(app: &App, frame: &mut Frame, area: Rect) {
         .enumerate()
         .map(|(i, e)| {
             let selected = i == app.selected && active_list;
-            let style = if selected {
+
+            let prefix = if e.skipped { "⏭️" } else { " " };
+            let display_name = format!("{}{}", prefix, e.original);
+            let style = if e.skipped {
+                if selected {
+                    Style::default()
+                        .fg(BG)
+                        .bg(TEXT_DIM)
+                        .add_modifier(Modifier::CROSSED_OUT)
+                } else {
+                    Style::default()
+                        .fg(TEXT_DIM)
+                        .add_modifier(Modifier::CROSSED_OUT)
+                }
+            } else if selected {
                 Style::default()
                     .fg(BG)
                     .bg(ACCENT)
@@ -181,7 +195,8 @@ fn render_file_lists(app: &App, frame: &mut Frame, area: Rect) {
             } else {
                 Style::default().fg(TEXT)
             };
-            ListItem::new(format!(" {}", e.original)).style(style)
+
+            ListItem::new(display_name).style(style)
         })
         .collect();
 
@@ -191,9 +206,12 @@ fn render_file_lists(app: &App, frame: &mut Frame, area: Rect) {
         .enumerate()
         .map(|(i, e)| {
             let selected = i == app.selected && active_list;
-            let (label, style) = match (&e.new_name, e.already_done) {
+
+            let prefix = if e.skipped { "⏭️" } else { "  " };
+
+            let (label, base_style) = match (&e.new_name, e.already_done) {
                 (_, true) => (
-                    format!(" {} ✓", e.original),
+                    format!(" {} {} ✓", prefix, e.original),
                     if selected {
                         Style::default().fg(BG).bg(GREEN)
                     } else {
@@ -201,7 +219,7 @@ fn render_file_lists(app: &App, frame: &mut Frame, area: Rect) {
                     },
                 ),
                 (Some(name), false) => (
-                    format!(" {}", name),
+                    format!(" {} {}", prefix, name),
                     if selected {
                         Style::default()
                             .fg(BG)
@@ -212,13 +230,19 @@ fn render_file_lists(app: &App, frame: &mut Frame, area: Rect) {
                     },
                 ),
                 (None, _) => (
-                    " ⚠️  Cannot rename".to_string(),
+                    format!("{} ⚠️  Cannot rename", prefix),
                     if selected {
                         Style::default().fg(BG).bg(YELLOW)
                     } else {
                         Style::default().fg(YELLOW)
                     },
                 ),
+            };
+
+            let style = if e.skipped {
+                base_style.fg(TEXT_DIM).add_modifier(Modifier::CROSSED_OUT)
+            } else {
+                base_style
             };
             ListItem::new(label).style(style)
         })
@@ -316,6 +340,7 @@ fn render_help(app: &App, frame: &mut Frame, area: Rect) {
         ],
         (AppMode::Normal, Focus::FileList) => &[
             ("↑↓ / j k", "Navigate"),
+            ("Space", "Skip/Include"),
             ("Enter / r", "Rename"),
             ("Tab", "→ Path"),
             ("q", "Quit"),
@@ -347,8 +372,22 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, area: Rect) {
     let renameable = app
         .entries
         .iter()
-        .filter(|e| e.new_name.is_some() && !e.already_done)
+        .filter(|e| e.new_name.is_some() && !e.already_done && !e.skipped)
         .count();
+
+    let skipped = app.entries.iter().filter(|e| e.skipped).count();
+
+    let text = if skipped > 0 {
+        format!(
+            "\n  {} file(s) will be renamed ({} skipped).\n\n  [y / Enter] Confirm    [n / Esc] Cancel",
+            renameable, skipped
+        )
+    } else {
+        format!(
+            "\n  {} file(s) will be renamed.\n\n  [y / Enter] Confirm    [n / Esc] Cancel",
+            renameable
+        )
+    };
 
     let w = 54u16;
     let h = 7u16;
@@ -367,11 +406,6 @@ fn render_confirm_dialog(app: &App, frame: &mut Frame, area: Rect) {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ))
         .bg(SURFACE);
-
-    let text = format!(
-        "\n  {} file(s) will be renamed.\n\n  [y / Enter] Confirm    [n / Esc] Cancel",
-        renameable
-    );
 
     let para = Paragraph::new(text)
         .block(block)

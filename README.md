@@ -35,13 +35,6 @@ tar xzf renamer-tui-<version>-x86_64-unknown-linux-gnu.tar.gz
 sudo mv renamer-tui-<version>-x86_64-unknown-linux-gnu /usr/local/bin/renamer-tui
 ```
 
-#### Linux ARM64
-
-```bash
-tar xzf renamer-tui-<version>-aarch64-unknown-linux-gnu.tar.gz
-sudo mv renamer-tui-<version>-aarch64-unknown-linux-gnu /usr/local/bin/renamer-tui
-```
-
 #### macOS (Apple Silicon)
 
 ```bash
@@ -85,6 +78,7 @@ renamer-tui
 | `Enter` (path bar)         | Scan the typed path                         |
 | `Tab`                      | Switch focus between path bar and file list |
 | `↑ / ↓` or `j / k`         | Navigate files                              |
+| `Space`                    | Toggle skip or selected file                |
 | `Enter` or `r` (file list) | Open rename confirmation                    |
 | `y` / `Enter`              | Confirm rename                              |
 | `n` / `Esc`                | Cancel                                      |

@@ -14,6 +14,8 @@ pub struct FileEntry {
     pub new_name: Option<String>,
     /// Whether this file has already been renamed (original == new_name).
     pub already_done: bool,
+    /// Whether the user has manually skipped this file
+    pub skipped: bool,
 }
 
 const VIDEO_EXTENSIONS: &[&str] = &[
@@ -137,6 +139,7 @@ pub fn scan_folder(path: &Path) -> Vec<FileEntry> {
             full_path,
             new_name,
             already_done,
+            skipped: false,
         };
 
         if VIDEO_EXTENSIONS.contains(&ext.as_str()) {

@@ -108,6 +108,22 @@ impl App {
                     KeyCode::Down | KeyCode::Char('j') => self.events.send(AppEvent::SelectNext),
                     KeyCode::Up | KeyCode::Char('k') => self.events.send(AppEvent::SelectPrev),
                     KeyCode::Tab => self.events.send(AppEvent::ToggleFocus),
+                    KeyCode::Char(' ') => {
+                        if !self.entries.is_empty() && self.selected < self.entries.len() {
+                            self.entries[self.selected].skipped =
+                                !self.entries[self.selected].skipped;
+                            let status = if self.entries[self.selected].skipped {
+                                "⏭️  Skipped"
+                            } else {
+                                "✓ Included"
+                            };
+
+                            self.log.push(format!(
+                                "{}:{}",
+                                status, self.entries[self.selected].original
+                            ));
+                        }
+                    }
                     KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         self.events.send(AppEvent::OpenPicker);
                     }
@@ -115,13 +131,14 @@ impl App {
                         let renameable = self
                             .entries
                             .iter()
-                            .filter(|e| e.new_name.is_some() && !e.already_done)
+                            .filter(|e| e.new_name.is_some() && !e.already_done && !e.skipped)
                             .count();
                         if renameable > 0 {
                             self.mode = AppMode::ConfirmDialog;
                         } else {
-                            self.log
-                                .push("Nothing to rename — all files are already done.".into());
+                            self.log.push(
+                                "Nothing to rename — all files are skipped or already done.".into(),
+                            );
                         }
                     }
                     KeyCode::Char('q') => self.events.send(AppEvent::Quit),
@@ -244,13 +261,16 @@ impl App {
             let renameable = self
                 .entries
                 .iter()
-                .filter(|e| e.new_name.is_some() && !e.already_done)
+                .filter(|e| e.new_name.is_some() && !e.already_done && !e.skipped)
                 .count();
+
+            let skipped = self.entries.iter().filter(|e| e.skipped).count();
+            let already_done = self.entries.iter().filter(|e| e.already_done).count();
+            let total = self.entries.len();
+
             self.log.push(format!(
-                "Found {} file(s) — {} to rename, {} already done or skipped.",
-                self.entries.len(),
-                renameable,
-                self.entries.len() - renameable,
+                "Found {} file(s) — {} to rename, {} already done, {} skipped.",
+                total, renameable, already_done, skipped,
             ));
         }
     }
@@ -263,6 +283,13 @@ impl App {
 
         for entry in &mut self.entries {
             if entry.already_done {
+                skipped += 1;
+                continue;
+            }
+
+            if entry.skipped {
+                self.log
+                    .push(format!("⏭️  Skipped (manual): {}", entry.original));
                 skipped += 1;
                 continue;
             }
